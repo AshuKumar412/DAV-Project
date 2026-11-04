@@ -1,0 +1,2 @@
+# System packages for Streamlit Community Cloud
+# No additional system packages required for this project
