@@ -200,8 +200,11 @@ def load_cached_csv(file_or_path, max_samples=None):
         else:
             df = pd.read_csv(file_or_path)
 
+        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+            return pd.DataFrame()
+
         # Handle column stripping
-        df.columns = [c.strip() for c in df.columns]
+        df.columns = [str(c).strip() for c in df.columns]
 
         if max_samples and len(df) > max_samples:
             df = df.sample(n=max_samples, random_state=42).reset_index(drop=True)
@@ -250,12 +253,15 @@ init_session_state()
 
 
 # Automatically load demo data if state is empty
-if st.session_state['data'] is None and st.session_state['demo_mode']:
+curr_data = st.session_state.get('data')
+if (curr_data is None or (isinstance(curr_data, pd.DataFrame) and curr_data.empty)) and st.session_state.get('demo_mode', True):
     demo_file = PROJECT_ROOT / 'data' / 'sample_network_traffic.csv'
     if demo_file.exists():
-        st.session_state['data'] = load_cached_csv(demo_file)
-        dp = DataPreprocessor()
-        st.session_state['target_col'] = dp.identify_target_column(st.session_state['data'])
+        loaded_demo = load_cached_csv(demo_file)
+        if loaded_demo is not None and not loaded_demo.empty:
+            st.session_state['data'] = loaded_demo
+            dp = DataPreprocessor()
+            st.session_state['target_col'] = dp.identify_target_column(loaded_demo)
 
 # Automatically load pre-trained models from disk if not in state
 trainer = ModelTrainer(models_dir=str(PROJECT_ROOT / 'models'))
@@ -373,15 +379,22 @@ with st.sidebar:
         if uploaded_file is not None:
             with st.spinner("Processing uploaded dataset..."):
                 custom_df = load_cached_csv(uploaded_file, max_samples=50000)
-                if custom_df is not None:
+                if custom_df is not None and isinstance(custom_df, pd.DataFrame) and not custom_df.empty:
                     st.session_state['data'] = custom_df
                     st.session_state['demo_mode'] = False
                     st.session_state['data_source'] = uploaded_file.name
                     dp = DataPreprocessor()
                     st.session_state['target_col'] = dp.identify_target_column(custom_df)
                     st.success(f"Loaded {len(custom_df):,} records!")
+                elif custom_df is not None and isinstance(custom_df, pd.DataFrame) and custom_df.empty:
+                    st.warning("Uploaded CSV file is empty or contains no valid rows.")
     else:
-        if not st.session_state['demo_mode'] or st.session_state['data'] is None:
+        current_data = st.session_state.get('data')
+        if (
+            not st.session_state.get('demo_mode')
+            or current_data is None
+            or (isinstance(current_data, pd.DataFrame) and current_data.empty)
+        ):
             demo_file = PROJECT_ROOT / 'data' / 'sample_network_traffic.csv'
             if demo_file.exists():
                 st.session_state['data'] = load_cached_csv(demo_file)
@@ -391,20 +404,20 @@ with st.sidebar:
                 st.session_state['target_col'] = dp.identify_target_column(st.session_state['data'])
 
     # Display Current Data Info
-    if st.session_state['data'] is not None:
-        df_cur = st.session_state['data']
+    df_cur = st.session_state.get('data')
+    if df_cur is not None and isinstance(df_cur, pd.DataFrame) and not df_cur.empty:
         st.markdown(f"""
         <div style='background: rgba(22, 27, 34, 0.8); padding: 10px; border-radius: 6px; font-size: 0.8rem; margin: 10px 0;'>
             <div><strong>Records:</strong> {len(df_cur):,}</div>
             <div><strong>Features:</strong> {len(df_cur.columns)} cols</div>
-            <div><strong>Target:</strong> {st.session_state['target_col'] or 'Unlabeled'}</div>
+            <div><strong>Target:</strong> {st.session_state.get('target_col') or 'Unlabeled'}</div>
         </div>
         """, unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("#### ⚙️ Model Training")
 
-    if st.session_state['data'] is not None and st.session_state['target_col'] is not None:
+    if df_cur is not None and isinstance(df_cur, pd.DataFrame) and not df_cur.empty and st.session_state.get('target_col') is not None:
         train_btn = st.button("⚡ Retrain All Models", use_container_width=True, type="primary")
         if train_btn:
             with st.status("Training Machine Learning Models...", expanded=True) as status:
@@ -483,7 +496,7 @@ def render_security_overview():
     render_demo_badge()
 
     df = st.session_state.get('data')
-    if df is None:
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         st.warning("No network traffic data available. Please select Demo Dataset or upload a CSV file.")
         return
 
@@ -594,10 +607,16 @@ def render_security_overview():
 
     # Recent Alerts Section
     st.markdown("<div class='section-title'>🚨 Recent Security Alerts</div>", unsafe_allow_html=True)
-    events = st.session_state.get('security_events', [])
-    if events:
-        events_df = pd.DataFrame(events).tail(10)
-        st.dataframe(events_df, use_container_width=True)
+    raw_events = st.session_state.get('security_events')
+    events_df = None
+    if isinstance(raw_events, pd.DataFrame):
+        if not raw_events.empty:
+            events_df = raw_events
+    elif isinstance(raw_events, (list, tuple)) and len(raw_events) > 0:
+        events_df = pd.DataFrame(raw_events)
+
+    if events_df is not None and not events_df.empty:
+        st.dataframe(events_df.tail(10), use_container_width=True)
     else:
         # Generate representative recent alerts from dataset
         if target_col and target_col in df.columns:
@@ -620,7 +639,7 @@ def render_traffic_analysis():
     render_demo_badge()
 
     df = st.session_state.get('data')
-    if df is None:
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         st.warning("Please load or upload a network traffic dataset.")
         return
 
@@ -719,7 +738,7 @@ def render_intrusion_detection():
     render_demo_badge()
 
     df = st.session_state.get('data')
-    if df is None:
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         st.warning("Please load or upload network traffic data.")
         return
 
@@ -756,9 +775,9 @@ def render_intrusion_detection():
 
     # Show Results if available
     preds = st.session_state.get('predictions')
-    if preds is not None:
+    if preds is not None and isinstance(preds, pd.DataFrame) and not preds.empty:
         total_pred = len(preds)
-        mal_count = int(preds['is_malicious'].sum())
+        mal_count = int(preds['is_malicious'].sum()) if 'is_malicious' in preds.columns else 0
         ben_count = total_pred - mal_count
         threat_rate = safe_divide(mal_count, total_pred) * 100
 
@@ -771,25 +790,29 @@ def render_intrusion_detection():
         with kp3:
             render_kpi_card("Intrusions Detected", f"{mal_count:,}", f"{threat_rate:.1f}% attack rate", "border-red")
         with kp4:
-            avg_conf = preds['confidence'].mean() * 100 if 'confidence' in preds.columns else 95.0
+            avg_conf = preds['confidence'].mean() * 100 if 'confidence' in preds.columns and preds['confidence'].notna().any() else 95.0
             render_kpi_card("Mean Confidence", f"{avg_conf:.1f}%", "Model probability", "border-purple")
 
         # Distribution Chart
         p1, p2 = st.columns(2)
         with p1:
-            fig_cat = create_attack_distribution_chart(preds['predicted_label'])
-            st.plotly_chart(fig_cat, use_container_width=True)
+            if 'predicted_label' in preds.columns:
+                fig_cat = create_attack_distribution_chart(preds['predicted_label'])
+                st.plotly_chart(fig_cat, use_container_width=True)
         with p2:
             fig_pie = create_normal_vs_malicious_chart(ben_count, mal_count)
             st.plotly_chart(fig_pie, use_container_width=True)
 
         # Filter & Table
         st.markdown("<div class='section-title'>📋 Classification Results</div>", unsafe_allow_html=True)
-        categories = preds['predicted_label'].unique().tolist()
+        categories = preds['predicted_label'].unique().tolist() if 'predicted_label' in preds.columns else []
         selected_cats = st.multiselect("Filter by Attack Category", categories, default=categories)
 
-        filtered_preds = preds[preds['predicted_label'].isin(selected_cats)]
-        st.dataframe(filtered_preds.head(250), use_container_width=True)
+        filtered_preds = preds[preds['predicted_label'].isin(selected_cats)] if 'predicted_label' in preds.columns and selected_cats else preds
+        if filtered_preds.empty:
+            st.warning("No records match the selected category filters.")
+        else:
+            st.dataframe(filtered_preds.head(250), use_container_width=True)
 
         # Downloads
         d1, d2 = st.columns(2)
@@ -825,7 +848,7 @@ def render_anomaly_detection():
     render_demo_badge()
 
     df = st.session_state.get('data')
-    if df is None:
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         st.warning("Please load or upload network traffic data.")
         return
 
@@ -862,9 +885,9 @@ def render_anomaly_detection():
 
     # Display results
     ad_results = st.session_state.get('anomaly_results')
-    if ad_results is not None:
+    if ad_results is not None and isinstance(ad_results, pd.DataFrame) and not ad_results.empty:
         tot = len(ad_results)
-        anom_count = int(ad_results['is_anomaly'].sum())
+        anom_count = int(ad_results['is_anomaly'].sum()) if 'is_anomaly' in ad_results.columns else 0
         norm_count = tot - anom_count
         anom_rate = safe_divide(anom_count, tot) * 100
 
@@ -877,7 +900,7 @@ def render_anomaly_detection():
         with a3:
             render_kpi_card("Anomalies Flagged", f"{anom_count:,}", f"{anom_rate:.1f}% outlier rate", "border-yellow")
         with a4:
-            min_score = ad_results['anomaly_score'].min()
+            min_score = ad_results['anomaly_score'].min() if 'anomaly_score' in ad_results.columns else 0.0
             render_kpi_card("Extreme Score", f"{min_score:.3f}", "Most anomalous flow", "border-red")
 
         # Scatter Plot of Anomalies
@@ -887,16 +910,23 @@ def render_anomaly_detection():
 
         # Anomalous Records Table
         st.markdown("<div class='section-title'>🚨 Flagged Anomalous Traffic Records</div>", unsafe_allow_html=True)
-        anom_df = ad_results[ad_results['is_anomaly'] == True]
-        st.dataframe(anom_df.head(200), use_container_width=True)
-
-        csv_anom = anom_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            "📥 Download Anomaly Report (CSV)",
-            data=csv_anom,
-            file_name="anomaly_detection_report.csv",
-            mime="text/csv"
+        anom_df = (
+            ad_results[ad_results['is_anomaly'] == True]
+            if 'is_anomaly' in ad_results.columns
+            else ad_results.iloc[0:0]
         )
+        if anom_df.empty:
+            st.success("No anomalous records flagged under current contamination threshold.")
+        else:
+            st.dataframe(anom_df.head(200), use_container_width=True)
+
+            csv_anom = anom_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📥 Download Anomaly Report (CSV)",
+                data=csv_anom,
+                file_name="anomaly_detection_report.csv",
+                mime="text/csv"
+            )
     else:
         st.info("Adjust the contamination slider and click 'Run Anomaly Detection' to detect outliers.")
 
@@ -918,23 +948,32 @@ def render_model_performance():
 
     # Model Comparison Table
     st.markdown("<div class='section-title'>🏆 Comparative Model Benchmark</div>", unsafe_allow_html=True)
-    st.dataframe(comp_df, use_container_width=True)
+    if comp_df is not None and not comp_df.empty:
+        st.dataframe(comp_df, use_container_width=True)
+    else:
+        st.info("No comparative model data available.")
 
     # Comparison Grouped Bar Chart
     st.markdown("<div class='section-title'>📊 Metric Comparison Chart</div>", unsafe_allow_html=True)
-    fig_comp = create_model_comparison_chart(comp_df)
-    st.plotly_chart(fig_comp, use_container_width=True)
+    if comp_df is not None and not comp_df.empty:
+        fig_comp = create_model_comparison_chart(comp_df)
+        st.plotly_chart(fig_comp, use_container_width=True)
 
     # Individual Model Breakdown
     st.markdown("<div class='section-title'>🔍 Model Deep-Dive & Diagnostics</div>", unsafe_allow_html=True)
-    chosen_eval_model = st.selectbox("Select Model to Inspect", list(eval_results.keys()))
-    m_info = eval_results[chosen_eval_model]
+    model_keys = list(eval_results.keys())
+    if not model_keys:
+        st.info("No individual model results to inspect.")
+        return
+
+    chosen_eval_model = st.selectbox("Select Model to Inspect", model_keys)
+    m_info = eval_results.get(chosen_eval_model, {})
 
     col_m1, col_m2 = st.columns(2)
     with col_m1:
         st.markdown("##### 🔲 Confusion Matrix")
         cm = m_info.get('confusion_matrix')
-        if cm is not None:
+        if cm is not None and (hasattr(cm, '__len__') and len(cm) > 0):
             fig_cm = create_confusion_matrix_heatmap(cm, labels=None)
             st.plotly_chart(fig_cm, use_container_width=True)
         else:
@@ -947,7 +986,7 @@ def render_model_performance():
         if saved_m and feat_names:
             model_obj = saved_m['model'] if isinstance(saved_m, dict) else saved_m
             imp_df = evaluator.get_feature_importance(model_obj, feat_names)
-            if imp_df is not None:
+            if imp_df is not None and isinstance(imp_df, pd.DataFrame) and not imp_df.empty:
                 fig_imp = create_feature_importance_chart(imp_df)
                 st.plotly_chart(fig_imp, use_container_width=True)
             else:
@@ -961,7 +1000,9 @@ def render_model_performance():
     if isinstance(cr, dict):
         cr_df = pd.DataFrame(cr).T
         st.dataframe(cr_df, use_container_width=True)
-    elif cr:
+    elif isinstance(cr, pd.DataFrame):
+        st.dataframe(cr, use_container_width=True)
+    elif cr is not None and str(cr).strip():
         st.text(str(cr))
 
 
@@ -973,28 +1014,36 @@ def render_security_events():
     render_header("🔔 Security Event Monitoring & Incident Response", "Audit log of high-severity network intrusion detections with severity ranking")
     render_demo_badge()
 
-    events = st.session_state.get('security_events', [])
+    raw_events = st.session_state.get('security_events')
 
-    # If no real events yet, generate mock baseline events from data
-    if not events:
+    # Convert or validate existing events safely
+    events_df = None
+    if isinstance(raw_events, pd.DataFrame):
+        if not raw_events.empty:
+            events_df = raw_events
+    elif isinstance(raw_events, (list, tuple)) and len(raw_events) > 0:
+        events_df = pd.DataFrame(raw_events)
+
+    # If no events yet, attempt to generate events from predictions if available
+    if events_df is None or events_df.empty:
         preds = st.session_state.get('predictions')
-        if preds is not None:
-            events = generate_security_events(preds, model_name="Ensemble Classifier")
-            st.session_state['security_events'] = events
+        if preds is not None and isinstance(preds, pd.DataFrame) and not preds.empty:
+            generated = generate_security_events(preds, model_name="Ensemble Classifier")
+            if isinstance(generated, pd.DataFrame) and not generated.empty:
+                events_df = generated
+                st.session_state['security_events'] = events_df
 
-    if not events:
-        st.info("No security events have been logged yet. Execute Intrusion Detection on Page 3 to populate event telemetry.")
+    if events_df is None or events_df.empty:
+        st.info("No security events have been logged yet. Execute Intrusion Detection on Page 3 or train models to populate security event telemetry.")
         return
-
-    events_df = pd.DataFrame(events)
 
     # Severity KPIs
     st.markdown("<div class='section-title'>🚨 Incident Severity Breakdown</div>", unsafe_allow_html=True)
     tot_events = len(events_df)
-    crit_count = (events_df['severity'] == 'CRITICAL').sum()
-    high_count = (events_df['severity'] == 'HIGH').sum()
-    med_count = (events_df['severity'] == 'MEDIUM').sum()
-    low_count = (events_df['severity'] == 'LOW').sum()
+    crit_count = int((events_df['severity'] == 'CRITICAL').sum()) if 'severity' in events_df.columns else 0
+    high_count = int((events_df['severity'] == 'HIGH').sum()) if 'severity' in events_df.columns else 0
+    med_count = int((events_df['severity'] == 'MEDIUM').sum()) if 'severity' in events_df.columns else 0
+    low_count = int((events_df['severity'] == 'LOW').sum()) if 'severity' in events_df.columns else 0
 
     s1, s2, s3, s4, s5 = st.columns(5)
     with s1:
@@ -1017,30 +1066,44 @@ def render_security_events():
     st.markdown("<div class='section-title'>📋 Real-Time Incident Audit Log</div>", unsafe_allow_html=True)
     f_col1, f_col2 = st.columns(2)
     with f_col1:
+        sev_options = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
         sev_filters = st.multiselect(
             "Filter by Severity",
-            ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'],
-            default=['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
+            sev_options,
+            default=sev_options
         )
     with f_col2:
-        all_attacks = events_df['attack_category'].unique().tolist()
+        all_attacks = (
+            events_df['attack_category'].dropna().unique().tolist()
+            if 'attack_category' in events_df.columns
+            else []
+        )
         attack_filters = st.multiselect("Filter by Attack Category", all_attacks, default=all_attacks)
 
-    filtered_events = events_df[
-        (events_df['severity'].isin(sev_filters)) &
-        (events_df['attack_category'].isin(attack_filters))
-    ]
+    filtered_events = events_df
+    if 'severity' in events_df.columns and sev_filters:
+        filtered_events = filtered_events[filtered_events['severity'].isin(sev_filters)]
+    elif 'severity' in events_df.columns and not sev_filters:
+        filtered_events = filtered_events.iloc[0:0]
 
-    st.dataframe(filtered_events.head(250), use_container_width=True)
+    if 'attack_category' in events_df.columns and attack_filters:
+        filtered_events = filtered_events[filtered_events['attack_category'].isin(attack_filters)]
+    elif 'attack_category' in events_df.columns and not attack_filters:
+        filtered_events = filtered_events.iloc[0:0]
 
-    # Export Button
-    csv_events = filtered_events.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        "📥 Export Security Incidents Log (CSV)",
-        data=csv_events,
-        file_name="security_incident_report.csv",
-        mime="text/csv"
-    )
+    if filtered_events.empty:
+        st.warning("No security events match the current filter selection.")
+    else:
+        st.dataframe(filtered_events.head(250), use_container_width=True)
+
+        # Export Button
+        csv_events = filtered_events.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            "📥 Export Security Incidents Log (CSV)",
+            data=csv_events,
+            file_name="security_incident_report.csv",
+            mime="text/csv"
+        )
 
 
 # ==============================================================================

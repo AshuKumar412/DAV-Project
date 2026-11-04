@@ -98,6 +98,11 @@ def create_attack_distribution_chart(labels_series: pd.Series) -> go.Figure:
     -------
     plotly.graph_objects.Figure
     """
+    if labels_series is None or len(labels_series) == 0:
+        fig = go.Figure()
+        fig.add_annotation(text="No attack data available", showarrow=False, font=dict(color="#8892b0", size=14))
+        return _apply_layout(fig, "Attack Category Distribution")
+
     counts = labels_series.value_counts()
     colors = [_get_attack_color(lbl) for lbl in counts.index]
 
@@ -193,6 +198,17 @@ def create_feature_importance_chart(importance_df: pd.DataFrame) -> go.Figure:
     -------
     plotly.graph_objects.Figure
     """
+    if (
+        importance_df is None
+        or not isinstance(importance_df, pd.DataFrame)
+        or importance_df.empty
+        or "importance" not in importance_df.columns
+        or "feature" not in importance_df.columns
+    ):
+        fig = go.Figure()
+        fig.add_annotation(text="No feature importance data available", showarrow=False, font=dict(color="#8892b0", size=14))
+        return _apply_layout(fig, "Top 15 Feature Importances")
+
     top = importance_df.head(15).sort_values("importance", ascending=True)
     fig = go.Figure(
         data=[
@@ -262,6 +278,11 @@ def create_model_comparison_chart(comparison_df: pd.DataFrame) -> go.Figure:
     -------
     plotly.graph_objects.Figure
     """
+    if comparison_df is None or not isinstance(comparison_df, pd.DataFrame) or comparison_df.empty:
+        fig = go.Figure()
+        fig.add_annotation(text="No model comparison metrics available", showarrow=False, font=dict(color="#8892b0", size=14))
+        return _apply_layout(fig, "Model Comparison")
+
     metrics = ["Accuracy", "Precision (Macro)", "Recall (Macro)", "F1 (Macro)"]
     available = [m for m in metrics if m in comparison_df.columns]
 
@@ -314,6 +335,11 @@ def create_anomaly_scatter(
     -------
     plotly.graph_objects.Figure
     """
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty or label_col not in df.columns:
+        fig = go.Figure()
+        fig.add_annotation(text="No anomaly data available", showarrow=False, font=dict(color="#8892b0", size=14))
+        return _apply_layout(fig, "Anomaly Scatter Plot")
+
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     # Exclude score/label helper columns for axis selection
     axis_candidates = [
@@ -535,6 +561,12 @@ def create_severity_distribution(events_df: pd.DataFrame) -> go.Figure:
     plotly.graph_objects.Figure
     """
     order = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+
+    if events_df is None or not isinstance(events_df, pd.DataFrame) or events_df.empty or "severity" not in events_df.columns:
+        fig = go.Figure()
+        fig.add_annotation(text="No security events recorded", showarrow=False, font=dict(color="#8892b0", size=14))
+        return _apply_layout(fig, "Security Event Severity Distribution")
+
     counts = events_df["severity"].value_counts()
     # Reindex to ensure consistent ordering
     counts = counts.reindex(order).fillna(0).astype(int)

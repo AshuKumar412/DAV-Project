@@ -321,6 +321,19 @@ def generate_security_events(
         Event log with columns: event_id, timestamp, attack_category,
         severity, confidence, model_used, is_malicious.
     """
+    event_columns = [
+        "event_id",
+        "timestamp",
+        "attack_category",
+        "severity",
+        "confidence",
+        "model_used",
+        "is_malicious",
+    ]
+
+    if predictions_df is None or not isinstance(predictions_df, pd.DataFrame) or predictions_df.empty:
+        return pd.DataFrame(columns=event_columns)
+
     events = []
     base_time = datetime.now()
 
